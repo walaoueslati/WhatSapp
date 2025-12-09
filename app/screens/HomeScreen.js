@@ -1,64 +1,87 @@
-import React, { useEffect, useState } from 'react';
+// ============ HomeScreen.js ============
+import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import Icon from 'react-native-vector-icons/Ionicons';
-import Profile from './ProfileScreen';
-import Discussions from './UserListScreen';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import ProfileScreen from './ProfileScreen'; // Note: Changed from Profile to ProfileScreen
+import UserListScreen from './UserListScreen'; // Note: Changed from Discussions to UserListScreen
 import GroupsScreen from './GroupsScreen'; 
-import { auth, db } from '../../firebase/config';
-import { ref, update } from "firebase/database";
+import { auth } from '../../firebase/config';
 
-const Tab = createBottomTabNavigator();
+export default function HomeScreen(props) {
+  const Tab = createBottomTabNavigator();
+  const currentId = props.route?.params?.currentId || auth.currentUser?.uid;
 
-export default function HomeScreen({ navigation }) {
-  const [isActive, setIsActive] = useState(false);
-
-  useEffect(() => {
-    if (!auth.currentUser) {
-      navigation.reset({ routes: [{ name: 'Login' }] });
-      return;
-    }
-
-    const userRef = ref(db, `users/${auth.currentUser.uid}`);
-
-    const setUserActive = async () => {
-      try {
-        await update(userRef, { isActive: true });
-        setIsActive(true);
-      } catch (error) {
-        console.error("Error updating isActive: ", error);
-      }
-    };
-
-    setUserActive();
-
-    return () => {
-      if (auth.currentUser) {
-        update(userRef, { isActive: false }).catch((error) =>
-          console.error("Error updating isActive on unmount: ", error)
-        );
-      }
-    };
-  }, []);
+  console.log("HomeScreen - currentId:", currentId); // Debug log
 
   return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
+      initialRouteName="UserListScreen"
+      screenOptions={{
         headerShown: false,
-        tabBarIcon: ({ color, size }) => {
-          let iconName;
-          if (route.name === 'Discussions') iconName = 'chatbubbles-outline';
-          else if (route.name === 'Profile') iconName = 'person-outline';
-          else if (route.name === 'Groups') iconName = 'people-outline';
-          return <Icon name={iconName} size={size} color={color} />;
+        tabBarActiveTintColor: "#25D366",
+        tabBarInactiveTintColor: "#8898AA",
+        tabBarStyle: {
+          backgroundColor: "#0B141A",
+          borderTopColor: "#2E3A3F",
+          borderTopWidth: 1,
+          paddingBottom: 5,
+          paddingTop: 5,
+          height: 60,
         },
-        tabBarActiveTintColor: '#388E3C',
-        tabBarInactiveTintColor: 'gray',
-        tabBarStyle: { backgroundColor: '#E8F5E9' },
-      })}
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '600',
+          color: '#FFFFFF',
+        },
+      }}
     >
-      <Tab.Screen name="Discussions" component={Discussions} />
-      <Tab.Screen name="Groups" component={GroupsScreen} />
-      <Tab.Screen name="Profile" component={Profile} />
+      <Tab.Screen
+        name="UserListScreen"
+        component={UserListScreen}
+        initialParams={{ currentId }} 
+        options={{
+          tabBarLabel: "Discussions",
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons
+              name="message-text"
+              color={color}
+              size={size || 24}
+            />
+          ),
+        }}
+      />     
+      
+      <Tab.Screen
+        name="GroupsScreen"
+        component={GroupsScreen}
+        initialParams={{ currentId }}
+        options={{
+          tabBarLabel: "Groups",
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons
+              name="account-group" // CORRIGÉ : Icône correcte pour les groupes
+              color={color}
+              size={size || 24}
+            />
+          ),
+        }}
+      />
+      
+      <Tab.Screen
+        name="ProfileScreen"
+        component={ProfileScreen}
+        initialParams={{ currentId }} 
+        options={{
+          tabBarLabel: "Profile",
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons 
+              name="account-circle" 
+              color={color} 
+              size={size || 24}
+            />
+          ),
+        }}
+      />
     </Tab.Navigator>
   );
 }

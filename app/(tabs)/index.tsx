@@ -8,13 +8,18 @@ import RegisterScreen from '../screens/RegisterScreen';
 import HomeScreen from '../screens/HomeScreen';
 import ChatScreen from '../screens/ChatScreen';
 import GroupsScreen from '../screens/GroupsScreen';
+import Splash from '../screens/SplashScreen';
 
 const Stack = createNativeStackNavigator();
 
 export default function Tabs() {
   return (
     
-      <Stack.Navigator initialRouteName="Login">
+      <Stack.Navigator initialRouteName="Splash">
+        <Stack.Screen name="Splash" 
+        component={Splash} 
+        options={{ headerShown: false }}/>
+
         <Stack.Screen
           name="Login"
           component={LoginScreen}

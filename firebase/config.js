@@ -1,4 +1,5 @@
 // Import the functions you need from the SDKs you need
+import { createClient } from '@supabase/supabase-js';
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getDatabase } from "firebase/database";
@@ -17,8 +18,13 @@ const firebaseConfig = {
   measurementId: "G-H5NY0P4NRG"
 };
 
-// Initialize Firebase
+
 const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 export const db = getDatabase(app);
+
+const supabaseUrl = 'https://gzjnaomfisqmwsrhjhzd.supabase.co'
+const supabaseKey = 'sb_publishable_sl3rw8LpL53NPPguFtYH3g_hydYNKhw'
+export const supabase = createClient(supabaseUrl, supabaseKey)
+export default {app , supabase} ;

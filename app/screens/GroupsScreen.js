@@ -15,11 +15,15 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { MaterialIcons, Ionicons } from "@expo/vector-icons";
-import { auth, db, supabase } from "../../firebase/config";
-import { ref, onValue, off, push, set, get, remove } from "firebase/database";
+import { auth, db, supabase } from "../../firebase/config"; 
+import { ref, onValue, off, set, get, remove } from "firebase/database";
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { decode } from 'base64-arraybuffer';
+
+
+const GROUP_IMAGE_BUCKET = 'Group_Images'; 
+const DEFAULT_GROUP_IMAGE = "https://cdn-icons-png.flaticon.com/512/194/194938.png";
 
 export default function GroupsScreen({ navigation }) {
   const [groups, setGroups] = useState([]);
@@ -27,31 +31,32 @@ export default function GroupsScreen({ navigation }) {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [groupName, setGroupName] = useState("");
-  const [groupImage, setGroupImage] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [groupImage, setGroupImage] = useState(null); 
+  const [loading, setLoading] = useState(false); 
+  const [uploading, setUploading] = useState(false); 
   const [groupDescription, setGroupDescription] = useState("");
 
   const currentUserID = auth.currentUser?.uid;
 
-  // Charger les groupes de l'utilisateur
+  // --- I. CHARGEMENT DES DONNÉES ---
+  
+  // Charger les groupes de l'utilisateur actuel
   useEffect(() => {
     if (!currentUserID) return;
 
     const groupsRef = ref(db, "groups");
-    
+
     const unsubscribe = onValue(groupsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
-        // Filtrer les groupes où l'utilisateur est membre
         const userGroups = Object.entries(data)
           .filter(([_, group]) => group.members && group.members[currentUserID])
-          .map(([id, info]) => ({ 
-            id, 
+          .map(([id, info]) => ({
+            id,
             ...info,
             memberCount: Object.keys(info.members || {}).length
           }));
-        
+
         setGroups(userGroups);
       } else {
         setGroups([]);
@@ -61,21 +66,21 @@ export default function GroupsScreen({ navigation }) {
     return () => off(groupsRef);
   }, [currentUserID]);
 
-  // Charger tous les utilisateurs
+  // Charger tous les utilisateurs (sauf l'utilisateur actuel)
   useEffect(() => {
     if (!currentUserID) return;
 
     const usersRef = ref(db, "users");
-    
+
     const unsubscribe = onValue(usersRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
         const usersList = Object.entries(data)
           .filter(([id]) => id !== currentUserID)
-          .map(([id, info]) => ({ 
-            id, 
+          .map(([id, info]) => ({
+            id,
             name: info.name || "Inconnu",
-            profileImage: info.profileImage || "https://cdn-icons-png.flaticon.com/512/149/149071.png"
+            profileImage: info.profileImage || DEFAULT_GROUP_IMAGE 
           }));
         setUsers(usersList);
       }
@@ -84,59 +89,108 @@ export default function GroupsScreen({ navigation }) {
     return () => off(usersRef);
   }, [currentUserID]);
 
-  // Sélectionner une image pour le groupe
+  // --- II. GESTION DES IMAGES ---
+  
+  // 1. Sélectionner une image pour le groupe
   const pickGroupImage = async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
+
       if (status !== 'granted') {
         Alert.alert('Permission requise', 'Permission d\'accès à la galerie requise!');
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
       });
 
-      if (!result.canceled) {
+      if (!result.canceled && result.assets && result.assets.length > 0) {
         setGroupImage(result.assets[0].uri);
+        console.log('--- DBG: Image de groupe sélectionnée. URI locale:', result.assets[0].uri);
+      } else {
+         console.log('--- DBG: Sélection d\'image de groupe annulée ou échouée.');
       }
     } catch (error) {
-      console.error('Erreur sélection image:', error);
+      console.error('--- ERR: Erreur sélection image:', error);
       Alert.alert('Erreur', 'Impossible de sélectionner l\'image');
     }
   };
 
-  // Upload l'image du groupe vers Supabase
+  // 2. Upload l'image du groupe vers Supabase (avec correction Web/Native)
   const uploadGroupImage = async (imageUri, groupId) => {
+    console.log('--- DBG: Début de l\'upload de l\'image pour le groupe ID:', groupId);
+    console.log('--- DBG: Utilisation du bucket:', GROUP_IMAGE_BUCKET);
+    setUploading(true);
     try {
       const fileName = `group-${groupId}-${Date.now()}.jpg`;
-      const base64File = await FileSystem.readAsStringAsync(imageUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      const fileData = decode(base64File);
+      let fileData;
 
-      const { data, error } = await supabase.storage
-        .from('images')
+      // --- LOGIQUE DE LECTURE DU FICHIER ADAPTÉE À LA PLATEFORME ---
+      if (Platform.OS === 'web') {
+        console.log('--- DBG: (WEB) Lecture du fichier via fetch...');
+        const response = await fetch(imageUri);
+        const blob = await response.blob();
+        
+        fileData = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsArrayBuffer(blob);
+        });
+        
+      } else {
+        // Logique Native (iOS/Android)
+        console.log('--- DBG: (NATIVE) Lecture du fichier local en Base64...');
+        const base64File = await FileSystem.readAsStringAsync(imageUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        fileData = decode(base64File); 
+      }
+      // --- FIN LOGIQUE DE LECTURE ---
+
+      console.log(`--- DBG: Tentative d\'upload vers Supabase (Fichier: ${fileName})`);
+      
+      // Upload vers Supabase
+      const { error } = await supabase.storage
+        .from(GROUP_IMAGE_BUCKET) 
         .upload(fileName, fileData, {
           contentType: 'image/jpeg',
           cacheControl: '3600',
           upsert: true,
         });
 
-      if (error) throw error;
+      if (error) {
+         console.error('--- ERR: Erreur Supabase lors de l\'upload:', error.message, error);
+         throw error;
+      }
+      
+      console.log('--- DBG: Upload Supabase réussi. Récupération de l\'URL publique...');
+      
+      const { data: publicUrlData } = supabase.storage
+        .from(GROUP_IMAGE_BUCKET)
+        .getPublicUrl(fileName);
 
-      return supabase.storage.from('images').getPublicUrl(data.path).data.publicUrl;
+      if (publicUrlData && publicUrlData.publicUrl) {
+         console.log('--- DBG: URL publique de l\'image récupérée:', publicUrlData.publicUrl);
+         return publicUrlData.publicUrl;
+      } else {
+         console.error('--- ERR: URL publique non retournée par Supabase.');
+         return null;
+      }
+
     } catch (error) {
-      console.error('Erreur upload image:', error);
+      console.error('--- ERR: Erreur globale upload image:', error.message);
+      Alert.alert('Erreur', 'Impossible d\'uploader l\'image');
       return null;
+    } finally {
+        setUploading(false);
     }
   };
 
-  // Créer un nouveau groupe
   const createGroup = async () => {
     if (!groupName.trim()) {
       return Alert.alert("Erreur", "Veuillez entrer un nom pour le groupe");
@@ -146,23 +200,22 @@ export default function GroupsScreen({ navigation }) {
     }
 
     setLoading(true);
-    setUploading(true);
 
     try {
       const groupId = `group_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      // Upload de l'image si sélectionnée
+
       let imageUrl = null;
       if (groupImage) {
         imageUrl = await uploadGroupImage(groupImage, groupId);
       }
+      
+      const finalImageUrl = imageUrl || DEFAULT_GROUP_IMAGE;
 
-      // Créer l'objet groupe
       const groupData = {
         id: groupId,
         name: groupName.trim(),
         description: groupDescription.trim() || "",
-        image: imageUrl || "https://cdn-icons-png.flaticon.com/512/194/194938.png",
+        image: finalImageUrl,
         createdBy: currentUserID,
         createdAt: new Date().toISOString(),
         members: {
@@ -176,30 +229,30 @@ export default function GroupsScreen({ navigation }) {
         memberCount: selectedUsers.length + 1
       };
 
-      // Sauvegarder le groupe dans Firebase
+      
       await set(ref(db, `groups/${groupId}`), groupData);
 
-      // Ajouter le groupe à chaque membre
+      // 3. Ajouter le groupe à chaque membre (`userGroups/memberId/groupId`)
       const allMembers = [currentUserID, ...selectedUsers.map(u => u.id)];
       const updatePromises = allMembers.map(memberId => {
         return set(ref(db, `userGroups/${memberId}/${groupId}`), true);
       });
-
       await Promise.all(updatePromises);
 
-      // Créer la discussion pour le groupe
+      // 4. Créer la discussion pour le groupe (`discussions/group_groupId`)
       const discussionId = `group_${groupId}`;
+      console.log('--- DBG: Création de la discussion (path: discussions/group_...)');
       await set(ref(db, `discussions/${discussionId}`), {
         type: 'group',
         groupId: groupId,
         groupName: groupName.trim(),
-        groupImage: imageUrl || "https://cdn-icons-png.flaticon.com/512/194/194938.png",
+        groupImage: finalImageUrl,
         createdBy: currentUserID,
         createdAt: new Date().toISOString(),
         lastMessage: "",
         lastMessageTime: new Date().toISOString()
       });
-
+      
       // Réinitialiser le formulaire
       setGroupName("");
       setGroupDescription("");
@@ -208,19 +261,19 @@ export default function GroupsScreen({ navigation }) {
       setModalVisible(false);
 
       Alert.alert("Succès", "Groupe créé avec succès!");
-      
+
       // Rediriger vers le chat du groupe
-      navigation.navigate('Chat', {
+      navigation.navigate('ChatScreen', { 
         discussionID: discussionId,
         groupId: groupId,
         groupName: groupName.trim(),
-        groupImage: imageUrl || "https://cdn-icons-png.flaticon.com/512/194/194938.png",
+        groupImage: finalImageUrl,
         isGroup: true,
         currentId: currentUserID
       });
 
     } catch (error) {
-      console.error('Erreur création groupe:', error);
+      console.error('--- ERR: Erreur création groupe finale:', error);
       Alert.alert("Erreur", "Impossible de créer le groupe");
     } finally {
       setLoading(false);
@@ -240,29 +293,30 @@ export default function GroupsScreen({ navigation }) {
   // Naviguer vers un groupe
   const navigateToGroup = async (group) => {
     const discussionId = `group_${group.id}`;
-    
-    // Vérifier si la discussion existe, sinon la créer
+    const imageToUse = group.image || DEFAULT_GROUP_IMAGE;
+
+    // Vérifier/Créer la discussion (synchronisation)
     const discussionRef = ref(db, `discussions/${discussionId}`);
     const discussionSnap = await get(discussionRef);
-    
+
     if (!discussionSnap.exists()) {
       await set(discussionRef, {
         type: 'group',
         groupId: group.id,
         groupName: group.name,
-        groupImage: group.image || "https://cdn-icons-png.flaticon.com/512/194/194938.png",
+        groupImage: imageToUse,
         createdBy: group.createdBy,
         createdAt: group.createdAt || new Date().toISOString(),
         lastMessage: "",
         lastMessageTime: new Date().toISOString()
       });
     }
-    
+
     navigation.navigate('ChatScreen', {
       discussionID: discussionId,
       groupId: group.id,
       groupName: group.name,
-      groupImage: group.image || "https://cdn-icons-png.flaticon.com/512/194/194938.png",
+      groupImage: imageToUse,
       isGroup: true,
       currentId: currentUserID
     });
@@ -280,10 +334,11 @@ export default function GroupsScreen({ navigation }) {
           style: "destructive",
           onPress: async () => {
             try {
+              // Retirer le membre du groupe
               await remove(ref(db, `groups/${groupId}/members/${currentUserID}`));
-              
+              // Retirer le groupe des groupes de l'utilisateur
               await remove(ref(db, `userGroups/${currentUserID}/${groupId}`));
-              
+
               Alert.alert("Succès", "Vous avez quitté le groupe");
             } catch (error) {
               console.error('Erreur quitter groupe:', error);
@@ -295,32 +350,39 @@ export default function GroupsScreen({ navigation }) {
     );
   };
 
-  const renderGroup = ({ item }) => (
-    <TouchableOpacity
-      style={styles.groupCard}
-      onPress={() => navigateToGroup(item)}
-      onLongPress={() => leaveGroup(item.id)}
-    >
-      <View style={styles.groupInfo}>
-        <Image
-          source={{ uri: item.image || "https://cdn-icons-png.flaticon.com/512/194/194938.png" }}
-          style={styles.groupIcon}
-        />
-        <View style={styles.groupTextContainer}>
-          <Text style={styles.groupName}>{item.name}</Text>
-          <Text style={styles.groupMembers}>
-            {item.memberCount || Object.keys(item.members || {}).length} membres
-          </Text>
-          {item.description ? (
-            <Text style={styles.groupDescription} numberOfLines={1}>
-              {item.description}
+  // Rendu de chaque groupe
+  const renderGroup = ({ item }) => {
+    const imageUri = item.image || DEFAULT_GROUP_IMAGE;
+
+    return (
+      <TouchableOpacity
+        style={styles.groupCard}
+        onPress={() => navigateToGroup(item)}
+        onLongPress={() => leaveGroup(item.id)}
+      >
+        <View style={styles.groupInfo}>
+          <Image
+            source={{ uri: imageUri }}
+            style={styles.groupIcon}
+          />
+          <View style={styles.groupTextContainer}>
+            <Text style={styles.groupName}>{item.name}</Text>
+            <Text style={styles.groupMembers}>
+              {item.memberCount || Object.keys(item.members || {}).length} membres
             </Text>
-          ) : null}
+            {item.description ? (
+              <Text style={styles.groupDescription} numberOfLines={1}>
+                {item.description}
+              </Text>
+            ) : null}
+          </View>
         </View>
-      </View>
-      <MaterialIcons name="chevron-right" size={24} color="#2E7D32" />
-    </TouchableOpacity>
-  );
+        <MaterialIcons name="chevron-right" size={24} color="#2E7D32" />
+      </TouchableOpacity>
+    );
+  };
+
+  // --- IV. RENDER DU COMPOSANT ---
 
   return (
     <View style={styles.container}>
@@ -342,28 +404,35 @@ export default function GroupsScreen({ navigation }) {
         contentContainerStyle={{ paddingBottom: 100 }}
       />
 
+      {/* FAB pour ouvrir le modal de création */}
       <TouchableOpacity
         style={styles.fab}
-        onPress={() => setModalVisible(true)}
+        onPress={() => {
+          setGroupName("");
+          setGroupDescription("");
+          setSelectedUsers([]);
+          setGroupImage(null);
+          setModalVisible(true);
+        }}
       >
         <MaterialIcons name="group-add" size={28} color="#fff" />
       </TouchableOpacity>
 
       {/* Modal de création de groupe */}
-      <Modal 
-        visible={modalVisible} 
-        animationType="slide" 
+      <Modal
+        visible={modalVisible}
+        animationType="slide"
         transparent
         onRequestClose={() => !loading && setModalVisible(false)}
       >
-        <KeyboardAvoidingView 
+        <KeyboardAvoidingView
           style={styles.modalBackground}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Créer un nouveau groupe</Text>
-              <TouchableOpacity 
+              <TouchableOpacity
                 onPress={() => !loading && setModalVisible(false)}
                 disabled={loading}
               >
@@ -371,12 +440,35 @@ export default function GroupsScreen({ navigation }) {
               </TouchableOpacity>
             </View>
 
-            <ScrollView 
+            <ScrollView
               style={styles.modalScrollView}
               showsVerticalScrollIndicator={false}
             >
-             
-                          <TextInput
+              {/* Sélection d'image de groupe */}
+              <TouchableOpacity
+                style={styles.imagePicker}
+                onPress={pickGroupImage}
+                disabled={loading || uploading}
+              >
+                {uploading ? (
+                    <ActivityIndicator size="large" color="#2E7D32" style={styles.imagePlaceholder} />
+                ) : groupImage ? (
+                  <Image
+                    source={{ uri: groupImage }}
+                    style={styles.selectedImage}
+                  />
+                ) : (
+                  <View style={styles.imagePlaceholder}>
+                    <MaterialIcons name="camera-alt" size={40} color="#2E7D32" />
+                  </View>
+                )}
+                <Text style={styles.imagePlaceholderText}>
+                  Choisir image de groupe
+                </Text>
+              </TouchableOpacity>
+
+              {/* Nom du groupe */}
+              <TextInput
                 placeholder="Nom du groupe *"
                 value={groupName}
                 onChangeText={setGroupName}
@@ -385,7 +477,19 @@ export default function GroupsScreen({ navigation }) {
                 editable={!loading}
               />
 
-                          <Text style={styles.modalSubtitle}>
+              {/* Description du groupe */}
+              <TextInput
+                placeholder="Description du groupe (Optionnel)"
+                value={groupDescription}
+                onChangeText={setGroupDescription}
+                style={[styles.input, styles.textArea]}
+                placeholderTextColor="#2E7D32"
+                multiline
+                editable={!loading}
+              />
+
+              {/* Sélection des membres */}
+              <Text style={styles.modalSubtitle}>
                 Sélectionner les membres ({selectedUsers.length} sélectionnés) *
               </Text>
 
@@ -396,7 +500,7 @@ export default function GroupsScreen({ navigation }) {
                     style={[
                       styles.userCard,
                       selectedUsers.find((u) => u.id === user.id) &&
-                        styles.selectedUser,
+                      styles.selectedUser,
                     ]}
                     onPress={() => toggleSelectUser(user)}
                     disabled={loading}
@@ -416,7 +520,7 @@ export default function GroupsScreen({ navigation }) {
               </View>
             </ScrollView>
 
-            {/* Boutons d'action */}
+            {/* Boutons d'action du modal */}
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
@@ -425,18 +529,18 @@ export default function GroupsScreen({ navigation }) {
               >
                 <Text style={styles.cancelButtonText}>Annuler</Text>
               </TouchableOpacity>
-              
+
               <TouchableOpacity
                 style={[
-                  styles.modalButton, 
+                  styles.modalButton,
                   styles.confirmButton,
-                  (!groupName.trim() || selectedUsers.length === 0 || loading) && 
-                    styles.disabledButton
+                  (!groupName.trim() || selectedUsers.length === 0 || loading || uploading) &&
+                  styles.disabledButton
                 ]}
                 onPress={createGroup}
-                disabled={!groupName.trim() || selectedUsers.length === 0 || loading}
+                disabled={!groupName.trim() || selectedUsers.length === 0 || loading || uploading}
               >
-                {loading ? (
+                {loading || uploading ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
                   <>
@@ -453,11 +557,13 @@ export default function GroupsScreen({ navigation }) {
   );
 }
 
+// --- V. STYLES ---
+
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: "#E8F5E9", 
-    paddingTop: 20 
+  container: {
+    flex: 1,
+    backgroundColor: "#E8F5E9",
+    paddingTop: 20
   },
   title: {
     fontSize: 28,
@@ -483,10 +589,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flex: 1,
   },
-  groupIcon: { 
-    width: 60, 
-    height: 60, 
-    borderRadius: 30 
+  groupIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 30
   },
   groupTextContainer: {
     marginLeft: 15,
@@ -527,14 +633,14 @@ const styles = StyleSheet.create({
   modalBackground: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: "flex-end", 
   },
   modalContainer: {
-    width: "90%",
-    maxHeight: "80%",
+    width: "100%",
+    maxHeight: "90%",
     backgroundColor: "#E8F5E9",
-    borderRadius: 15,
+    borderTopLeftRadius: 15,
+    borderTopRightRadius: 15,
     overflow: "hidden",
   },
   modalHeader: {
@@ -619,23 +725,23 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     backgroundColor: "#fff",
   },
-  selectedUser: { 
+  selectedUser: {
     backgroundColor: "#C8E6C9",
     borderColor: "#2E7D32",
   },
-  userInfo: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    flex: 1 
+  userInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1
   },
-  profileImage: { 
-    width: 45, 
-    height: 45, 
+  profileImage: {
+    width: 45,
+    height: 45,
     borderRadius: 22.5,
     marginRight: 10,
   },
-  userName: { 
-    fontSize: 16, 
+  userName: {
+    fontSize: 16,
     color: "#2E7D32",
     flex: 1,
   },

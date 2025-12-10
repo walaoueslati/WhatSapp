@@ -1,8 +1,8 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { off, onValue, ref } from "firebase/database";
-import React, { useEffect, useState } from "react";
-import {
+import React, { useEffect, useState, useMemo } from "react";
+import { 
   Alert,
   FlatList,
   Platform,
@@ -10,131 +10,231 @@ import {
   Text,
   TouchableOpacity,
   View,
-  Image
+  Image,
+  TextInput, 
 } from "react-native";
 import { db } from "../../firebase/config";
 
 export default function UsersListScreen(props) {
-  const [users, setUsers] = useState([]);
+  const [usersFromDB, setUsersFromDB] = useState([]); 
+  const [searchTerm, setSearchTerm] = useState('');
   const currentId = props.route.params?.currentId;
 
   useEffect(() => {
     const usersRef = ref(db, 'users');
     
     const unsubscribe = onValue(usersRef, (snapshot) => {
-      console.log(" Snapshot exists:", snapshot.exists());
+      console.log("Snapshot exists:", snapshot.exists());
       
-      const d = [];
-      snapshot.forEach((un_user) => {
-        const userData = un_user.val();
-        const userId = userData.id || un_user.key;
-        
-        if (userId !== currentId) {
-          d.push({
-            ...userData,
-            id: userId 
-          });
-        }
-      });
-      setUsers(d);
+      const allUsers = [];
+      
+      if (snapshot.exists()) {
+        snapshot.forEach((userSnapshot) => {
+          const userData = userSnapshot.val();
+          const userId = userSnapshot.key; 
+          
+          if (userId !== currentId) {
+            allUsers.push({
+              ...userData,
+              id: userId,
+              isOnline: userData.isActive === true 
+            });
+          }
+        });
+      }
+      
+      allUsers.sort((a, b) => (b.isOnline - a.isOnline));
+      
+      setUsersFromDB(allUsers); 
     });
 
     return () => {
-      off(usersRef);
+      off(usersRef, 'value', unsubscribe);
     };
   }, [currentId]);
+
+  const filteredUsers = useMemo(() => {
+    if (!searchTerm) {
+      return usersFromDB;
+    }
+
+    const lowerCaseSearchTerm = searchTerm.toLowerCase();
+
+    return usersFromDB.filter(user => {
+      const nameMatch = user.name?.toLowerCase().includes(lowerCaseSearchTerm);
+      const phoneMatch = user.phone?.toLowerCase().includes(lowerCaseSearchTerm);
+
+      return nameMatch || phoneMatch; 
+    });
+  }, [usersFromDB, searchTerm]); 
+  const navigateToChat = (item) => {
+    if (!item.id) {
+        Alert.alert("Erreur", "ID utilisateur manquant.");
+        return;
+    }
+    props.navigation.navigate("ChatScreen", {
+      currentId: currentId,
+      secondId: item.id,
+      user: item
+    });
+  };
+
+  const handleCall = (item) => {
+    if (item.phone) {
+      Alert.alert(
+        "Appel", 
+        `Appeler ${item.name || item.pseudo || "cet utilisateur"} au ${item.phone} ?`,
+        [
+          { text: "Annuler", style: "cancel" },
+          { 
+            text: "Appeler", 
+            onPress: () => {
+              console.log(`Tentative d'appel vers: ${item.phone}`);
+              Alert.alert("Appel Démarré", `Appel vers ${item.phone}...`);
+            }
+          }
+        ]
+      );
+    } else {
+      Alert.alert("Erreur", "Aucun numéro de téléphone disponible pour cet utilisateur.");
+    }
+  };
+
+  const renderUserItem = ({ item }) => {
+    const statusColor = item.isOnline ? '#25D366' : '#9E9E9E'; 
+    const statusText = item.isOnline ? 'En Ligne' : 'Hors Ligne';
+    
+    return (
+      <View style={styles.userItem}>
+        <View style={styles.avatarContainer}>
+          {item.profileImage ? (
+            <Image 
+              source={{ uri: item.profileImage }} 
+              style={styles.avatar} 
+            />
+          ) : (
+            <View style={styles.avatarPlaceholder}>
+              <Text style={styles.avatarText}>
+                {item.name?.[0]?.toUpperCase() ?? "?"}
+              </Text>
+            </View>
+          )}
+          
+          <View style={[styles.statusDot, { borderColor: statusColor }]}>
+            <View style={[styles.onlineInner, { backgroundColor: statusColor }]} />
+          </View>
+        </View>
+        
+        <View style={styles.userInfo}>
+          <View style={styles.nameContainer}>
+            <Text style={styles.name}>{item.name || "Utilisateur Inconnu"}</Text>
+          </View>
+          
+          <View style={styles.statusInfo}>
+            <View style={styles.onlineIndicator}>
+              <MaterialCommunityIcons 
+                name="circle" 
+                size={8} 
+                color={statusColor} 
+                style={styles.statusIcon}
+              />
+              <Text style={[styles.onlineLabel, { color: statusColor }]}>
+                {statusText}
+              </Text>
+            </View>
+          </View>
+          
+          <Text style={styles.phone}>{item.phone || "Pas de numéro"}</Text>
+          <Text style={styles.pseudo}>
+            {item.pseudo ? `@${item.pseudo}` : item.email}
+          </Text>
+        </View>
+        
+        <View style={styles.iconsRow}>
+          <TouchableOpacity
+            style={styles.iconButton}
+            onPress={() => handleCall(item)}
+          >
+            <MaterialCommunityIcons
+              name="phone"
+              size={28}
+              color={statusColor}
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.iconButton}
+            onPress={() => navigateToChat(item)}
+          >
+            <MaterialCommunityIcons
+              name="message-text"
+              size={28}
+              color="#2D6A4F"
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
 
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      <Text style={styles.title}>Discussions</Text>
+      <Text style={styles.title}>Tous les Utilisateurs</Text>
+      
+      <View style={styles.searchContainer}>
+        <MaterialCommunityIcons name="magnify" size={24} color="#40916C" style={styles.searchIcon} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Rechercher par nom ou téléphone..."
+          value={searchTerm}
+          onChangeText={setSearchTerm}
+          clearButtonMode="while-editing"
+        />
+        {searchTerm.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchTerm('')} style={styles.clearButton}>
+            <MaterialCommunityIcons name="close-circle" size={20} color="#9E9E9E" />
+          </TouchableOpacity>
+        )}
+      </View>
+      
+      <View style={styles.headerStats}>
+        <View style={styles.statItem}>
+          <View style={styles.onlineDot} />
+          <Text style={styles.statText}>
+            {usersFromDB.filter(u => u.isOnline).length} en ligne
+          </Text>
+        </View>
+        <View style={[styles.statItem, { marginLeft: 20 }]}>
+          <View style={[styles.onlineDot, { backgroundColor: '#9E9E9E' }]} />
+          <Text style={styles.statText}>
+            {usersFromDB.filter(u => !u.isOnline).length} hors ligne
+          </Text>
+        </View>
+      </View>
 
       <FlatList
-        data={users}
-        keyExtractor={(item, index) => item.id || index.toString()}
+        data={filteredUsers} 
+        keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
-          <Text style={styles.empty}>Aucun utilisateur disponible</Text>
-        }
-        renderItem={({ item }) => (
-          <View style={styles.userItem}>
-            {/* Affichage de l'image de profil ou placeholder */}
-            {item.profileImage ? (
-              <Image 
-                source={{ uri: item.profileImage }} 
-                style={styles.avatar} 
-              />
+          <View style={styles.emptyContainer}>
+            {searchTerm ? (
+                <>
+                    <MaterialCommunityIcons name="filter-remove-outline" size={60} color="#A5D6A7" />
+                    <Text style={styles.emptyTitle}>Aucun résultat pour "{searchTerm}"</Text>
+                    <Text style={styles.emptySubtitle}>Veuillez essayer un autre terme de recherche.</Text>
+                </>
             ) : (
-              <View style={styles.avatarPlaceholder}>
-                <Text style={styles.avatarText}>
-                  {item.name?.[0]?.toUpperCase() ?? "?"}
-                </Text>
-              </View>
+                <>
+                    <MaterialCommunityIcons name="account-off" size={60} color="#A5D6A7" />
+                    <Text style={styles.emptyTitle}>Base d'utilisateurs vide</Text>
+                    <Text style={styles.emptySubtitle}>Ajoutez des utilisateurs pour commencer à discuter.</Text>
+                </>
             )}
-            
-            <View style={styles.userInfo}>
-              <Text style={styles.name}>{item.name || "Utilisateur"}</Text>
-              <Text style={styles.phone}>{item.phone || "Pas de numéro"}</Text>
-              <Text style={styles.pseudo}>
-                {item.pseudo ? `@${item.pseudo}` : ""}
-              </Text>
-            </View>
-            
-            <View style={styles.iconsRow}>
-              <TouchableOpacity
-                style={styles.iconButton}
-                onPress={() => {
-                  if (item.phone) {
-                    Alert.alert(
-                      "Appel", 
-                      `Appeler ${item.name || item.pseudo || "cet utilisateur"} ?`,
-                      [
-                        { text: "Annuler", style: "cancel" },
-                        { 
-                          text: "Appeler", 
-                          onPress: () => {
-                            // Logique d'appel ici
-                            console.log(`Appel vers: ${item.phone}`);
-                          }
-                        }
-                      ]
-                    );
-                  } else {
-                    Alert.alert("Erreur", "Aucun numéro disponible");
-                  }
-                }}
-              >
-                <MaterialCommunityIcons
-                  name="phone"
-                  size={28}
-                  color="#25D366"
-                />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.iconButton}
-                onPress={() => {
-                  if (!item.id) {
-                    console.error(" User ID is undefined:", item);
-                    Alert.alert("Erreur", "Impossible d'ouvrir le chat");
-                    return;
-                  }
-                  props.navigation.navigate("ChatScreen", {
-                    currentId,
-                    secondId: item.id,
-                    user: item
-                  });
-                }}
-              >
-                <MaterialCommunityIcons
-                  name="message-text"
-                  size={28}
-                  color="#25D366"
-                />
-              </TouchableOpacity>
-            </View>
           </View>
-        )}
+        }
+        renderItem={renderUserItem}
       />
     </View>
   );
@@ -151,11 +251,78 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "bold",
     color: "#2D6A4F",
-    marginBottom: 20,
+    marginBottom: 15,
     textAlign: "center",
+  },
+  // NOUVEAUX STYLES POUR LA RECHERCHE
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 25,
+    paddingHorizontal: 15,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#B7E4C7',
+    height: 50,
+  },
+  searchIcon: {
+    marginRight: 10,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#1B4332',
+    height: '100%',
+  },
+  clearButton: {
+    padding: 5,
+    marginLeft: 5,
+  },
+  // FIN NOUVEAUX STYLES POUR LA RECHERCHE
+  headerStats: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 20,
+  },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  onlineDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#25D366',
+  },
+  statText: {
+    fontSize: 14,
+    color: '#2D6A4F',
+    fontWeight: '500',
   },
   list: {
     paddingBottom: 20,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 80,
+    padding: 20,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#2D6A4F',
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   userItem: {
     flexDirection: "row",
@@ -174,17 +341,18 @@ const styles = StyleSheet.create({
       elevation: 4,
     }),
   },
-  // Styles pour l'avatar image
+  avatarContainer: {
+    position: 'relative',
+    marginRight: 16,
+  },
   avatar: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    marginRight: 16,
     borderWidth: 2,
     borderColor: "#40916C",
     backgroundColor: '#f0f0f0',
   },
-  // Styles pour le placeholder d'avatar
   avatarPlaceholder: {
     width: 56,
     height: 56,
@@ -192,7 +360,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#40916C",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 16,
     borderWidth: 2,
     borderColor: "#2D6A4F",
   },
@@ -201,15 +368,55 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     fontSize: 22,
   },
+  statusDot: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#25D366', 
+  },
+  onlineInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#25D366',
+  },
   userInfo: {
     flex: 1,
     justifyContent: "center",
+  },
+  nameContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
   },
   name: {
     fontSize: 18,
     fontWeight: "700",
     color: "#1B4332",
+    marginRight: 8,
+  },
+  statusInfo: {
     marginBottom: 4,
+  },
+  onlineIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  statusIcon: {
+    marginRight: 4,
+  },
+  onlineLabel: {
+    fontSize: 12,
+    color: '#25D366',
+    fontWeight: '500',
   },
   phone: {
     fontSize: 14,
@@ -246,12 +453,5 @@ const styles = StyleSheet.create({
       shadowRadius: 2,
       elevation: 2,
     }),
-  },
-  empty: {
-    textAlign: "center",
-    marginTop: 50,
-    color: "#2D6A44F",
-    fontSize: 16,
-    fontStyle: "italic",
   },
 });

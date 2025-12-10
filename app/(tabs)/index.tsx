@@ -7,9 +7,8 @@ import LoginScreen from '../screens/LoginScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import HomeScreen from '../screens/HomeScreen';
 import ChatScreen from '../screens/ChatScreen';
-import GroupsScreen from '../screens/GroupsScreen';
 import Splash from '../screens/SplashScreen';
-
+import GroupsScreen from '../screens/GroupsScreen';
 const Stack = createNativeStackNavigator();
 
 export default function Tabs() {
@@ -42,7 +41,10 @@ export default function Tabs() {
         />
         <Stack.Screen 
         name="ChatScreen" 
-        component={ChatScreen} />
+        component={ChatScreen} 
+         options={{ 
+          headerShown: false  
+        }}/>
 
       </Stack.Navigator>
   );

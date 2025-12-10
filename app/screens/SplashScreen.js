@@ -11,7 +11,7 @@ export default function Splash({ navigation }) {
 
   return (
     <ImageBackground
-      source={require("../../assets/images/images.png")}
+      source={require("../../assets/images/nabfncvpsn241.jpg")}
       style={styles.bg}
       resizeMode="cover" 
     >

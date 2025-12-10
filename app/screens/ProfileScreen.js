@@ -32,6 +32,8 @@ export default function ProfileScreen({ navigation }) {
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [isActive, setIsActive] = useState(false);
+  // NOUVEL ÉTAT: Basculement de la visibilité du mot de passe pour la modale de suppression
+  const [showDeletePwd, setShowDeletePwd] = useState(false); 
 
   // Function to upload image to Supabase (méthodologie du premier code)
   const uploadImageToSupabase = async (localURL) => {
@@ -120,16 +122,36 @@ export default function ProfileScreen({ navigation }) {
       setUploading(false);
     }
   };
+// ProfileScreen.js
 
-  const handleLogout = async () => {
-    try {
-      await update(dbRef(db, `users/${auth.currentUser.uid}`), { isActive: false });
-      await signOut(auth);
-      navigation.reset({ routes: [{ name: 'Login' }] });
-    } catch (error) {
-      Alert.alert('Error', 'Failed to logout. Please try again.');
-    }
-  };
+const handleLogout = async () => {
+  const currentUserId = auth.currentUser?.uid; // Sécurité
+
+  if (!currentUserId) {
+    // L'utilisateur n'est plus là, déconnectez-vous et naviguez.
+    await signOut(auth);
+    navigation.reset({ routes: [{ name: 'Login' }] });
+    return;
+  }
+
+  try {
+    // Met à jour isActive à false avant la déconnexion
+    const userRef = dbRef(db, `users/${currentUserId}`);
+    await update(userRef, { isActive: false });
+    
+    // Déconnecte l'utilisateur
+    await signOut(auth);
+    
+    // Le log est maintenant correct
+    console.log('User signed out successfully. isActive set to false.'); 
+    
+    // Navigation
+    navigation.reset({ routes: [{ name: 'Login' }] });
+  } catch (error) {
+    console.error("Logout error:", error);
+    Alert.alert('Error', 'Failed to logout. Please try again.');
+  }
+};
 
   const handleEditProfile = async () => {
     try {
@@ -156,7 +178,6 @@ export default function ProfileScreen({ navigation }) {
     }
 
     try {
-      // Reauthenticate user with password
       const credential = EmailAuthProvider.credential(
         auth.currentUser.email,
         deletePassword
@@ -164,7 +185,6 @@ export default function ProfileScreen({ navigation }) {
       
       await reauthenticateWithCredential(auth.currentUser, credential);
       
-      // Delete from Supabase storage (optional)
       try {
         await supabase.storage
           .from('LesImages_Profile')
@@ -271,7 +291,6 @@ export default function ProfileScreen({ navigation }) {
           </View>
         </Modal>
 
-        {/* Delete Profile Modal */}
         <Modal visible={isDeleteModalVisible} animationType="fade" transparent={true}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalContainer}>
@@ -280,14 +299,27 @@ export default function ProfileScreen({ navigation }) {
                 Are you sure you want to delete your profile? This action cannot be undone.
               </Text>
               <Text style={styles.passwordLabel}>Enter your password to confirm:</Text>
-              <TextInput 
-                style={styles.input} 
-                placeholder="Password" 
-                value={deletePassword} 
-                onChangeText={setDeletePassword}
-                secureTextEntry={true}
-                autoCapitalize="none"
-              />
+              
+              <View style={styles.passwordContainer}>
+                <TextInput 
+                  style={[styles.input, styles.passwordInput]}
+                  placeholder="Password" 
+                  value={deletePassword} 
+                  onChangeText={setDeletePassword}
+                  secureTextEntry={!showDeletePwd} // Basculement
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity
+                  style={styles.iconContainer}
+                  onPress={() => setShowDeletePwd(!showDeletePwd)}
+                >
+                  <Text style={styles.toggleIcon}>
+                      {showDeletePwd ? '—' : '•'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {/* FIN NOUVEAU */}
+              
               <View style={styles.modalButtonRow}>
                 <Button 
                   title="Delete" 
@@ -492,5 +524,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 8,
     gap: 12,
+  },
+  passwordContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    position: 'relative',
+  },
+  passwordInput: {
+    flex: 1,
+    marginBottom: 0, 
+    paddingRight: 50, 
+  },
+  iconContainer: {
+    position: 'absolute',
+    right: 5,
+    padding: 10,
+  },
+  toggleIcon: {
+    fontSize: 24,
+    color: '#1B5E20',
+    fontWeight: 'bold',
   },
 });

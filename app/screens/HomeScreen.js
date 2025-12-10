@@ -1,9 +1,8 @@
-// ============ HomeScreen.js ============
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import ProfileScreen from './ProfileScreen'; // Note: Changed from Profile to ProfileScreen
-import UserListScreen from './UserListScreen'; // Note: Changed from Discussions to UserListScreen
+import ProfileScreen from './ProfileScreen'; 
+import UserListScreen from './UserListScreen';
 import GroupsScreen from './GroupsScreen'; 
 import { auth } from '../../firebase/config';
 
@@ -11,7 +10,7 @@ export default function HomeScreen(props) {
   const Tab = createBottomTabNavigator();
   const currentId = props.route?.params?.currentId || auth.currentUser?.uid;
 
-  console.log("HomeScreen - currentId:", currentId); // Debug log
+  console.log("HomeScreen - currentId:", currentId); 
 
   return (
     <Tab.Navigator
@@ -59,7 +58,7 @@ export default function HomeScreen(props) {
           tabBarLabel: "Groups",
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons
-              name="account-group" // CORRIGÉ : Icône correcte pour les groupes
+              name="account-group" 
               color={color}
               size={size || 24}
             />
